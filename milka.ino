@@ -5,9 +5,9 @@
 // --- SETTINGS ---
 const char* ssid = "NU";
 const char* password = "1234512345";
-const char* firmware_url = "https://raw.githubusercontent.com/Abylkanov/milka/build/esp32.esp32.esp32/milka.ino.bin"; 
+const char* firmware_url = "https://github.com/Abylkanov/milka/raw/refs/heads/main/build/esp32.esp32.esp32/milka.ino.bin"; 
 
-const String FIRMWARE_VERSION = "1.0.6"; 
+const String FIRMWARE_VERSION = "1.0.7"; 
 
 const int LOADCELL_DOUT_PIN = 22;
 const int LOADCELL_SCK_PIN = 21;
