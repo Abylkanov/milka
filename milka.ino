@@ -124,14 +124,13 @@ void loop() {
       previousMillis = currentMillis;
 
       if (scale.is_ready()) {
-        telnet.print("RAW_DATA: ");
-        telnet.println(scale.read());
-        float weight = scale.get_units(20); // Среднее из 5 измерений
-        telnet.print("\r[Weight] "); // \r возвращает курсор в начало строки
-        telnet.print(String(weight, 2)); 
-        telnet.print(" units    "); // Пробелы в конце затирают старые цифры
+        // Читаем сразу усредненный вес
+        float weight = scale.get_units(15); 
+        
+        // Выводим в одну строку, чтобы не спамить
+        telnet.printf("\r[Weight] %.2f units (Raw: %ld)      ", weight, scale.read());
       } else {
-        telnet.println("[Error] HX711 not found.");
+        telnet.println("\n[Error] HX711 disconnected!");
       }
     }
   }
