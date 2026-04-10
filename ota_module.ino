@@ -2,25 +2,32 @@
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 
-
 void startOTA() {
-  telnet.println("\n[OTA] Connection to server...");
+  telnet.println("\n[OTA] Connection to GitHub...");
   
   WiFiClientSecure client;
-  client.setInsecure(); 
+  client.setInsecure(); // Отключаем проверку SSL сертификата (нужно для GitHub)
+  client.setHandshakeTimeout(30); // Таймаут для медленного интернета
 
   HTTPClient http;
+  
+  // КРИТИЧНО: Разрешаем редиректы для проверки файла (код 302)
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   
   if (http.begin(client, firmware_url)) {
     int httpCode = http.GET();
     telnet.printf("[OTA] HTTP Check Code: %d\n", httpCode);
-    http.end(); 
     
+    // После активации setFollowRedirects, при успешном переходе по 302
+    // сервер в итоге вернет 200 OK.
     if (httpCode == 200) {
       telnet.println("[OTA] File found. Starting download...");
-      
-      // We disable auto-reboot to try and send the final message
+      http.end(); // Закрываем проверочное соединение, чтобы освободить память
+
+      // Настройка процесса прошивки
       httpUpdate.rebootOnUpdate(false);
+      // КРИТИЧНО: Разрешаем редиректы и для самого процесса обновления
+      httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
       t_httpUpdate_return ret = httpUpdate.update(client, firmware_url);
 
@@ -43,6 +50,7 @@ void startOTA() {
       }
     } else {
       telnet.printf("[OTA] Error: Server returned code %d\n", httpCode);
+      http.end();
     }
   } else {
     telnet.println("[OTA] Unable to connect to server.");
