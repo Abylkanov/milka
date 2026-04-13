@@ -43,16 +43,27 @@ void runDiagnostics() {
     return;
   }
 
-  // 2. Collect 20 raw samples
+  // 2. Collect 20 raw samples, count failures
   const int N = 20;
   long samples[N];
+  int failures = 0;
   telnet.print("[INFO] Reading " + String(N) + " raw samples: ");
   for (int i = 0; i < N; i++) {
-    samples[i] = scale.read();
-    telnet.print(".");
-    delay(50);
+    if (scale.is_ready()) {
+      samples[i] = scale.read();
+      telnet.print(".");
+    } else {
+      samples[i] = 0;
+      failures++;
+      telnet.print("X");
+    }
+    delay(80);
   }
-  telnet.println(" done");
+  telnet.printf(" done (%d failures)\n", failures);
+
+  if (failures > N / 2) {
+    telnet.println("[FAIL] More than half of reads failed – unstable power or broken HX711");
+  }
 
   // 3. Statistics
   long vmin = samples[0], vmax = samples[0];
@@ -62,11 +73,11 @@ void runDiagnostics() {
     if (samples[i] > vmax) vmax = samples[i];
     sum += samples[i];
   }
-  long avg  = sum / N;
+  long avg   = sum / N;
   long noise = vmax - vmin;
 
-  telnet.printf("[RAW]  min=%-10ld  max=%-10ld\n", vmin, vmax);
-  telnet.printf("[RAW]  avg=%-10ld  noise(p-p)=%ld\n", avg, noise);
+  telnet.printf("[RAW]  min=%-12ld  max=%-12ld\n", vmin, vmax);
+  telnet.printf("[RAW]  avg=%-12ld  noise(p-p)=%ld\n", avg, noise);
 
   // 4. Noise verdict
   if      (noise <  1000)  telnet.println("[OK]   Noise excellent  (< 1 000)");
@@ -74,13 +85,22 @@ void runDiagnostics() {
   else if (noise < 50000)  telnet.println("[WARN] Noise high       (< 50 000) – check power/shielding");
   else                     telnet.println("[FAIL] Noise excessive  (>= 50 000) – likely wiring issue");
 
-  // 5. Zero / saturation check
-  if (avg == 0 || avg == -1)
-    telnet.println("[WARN] Average is 0 or -1 – DOUT may be floating");
-  else if (avg >= 8388607 || avg <= -8388608)
-    telnet.println("[WARN] ADC saturated – overloaded or wired backwards");
-  else
+  // 5. Saturation check with specific diagnostics
+  if (avg == 0) {
+    telnet.println("[WARN] avg=0 – DOUT may be floating (no load cell?)");
+  } else if (avg == -8388608) {
+    telnet.println("[FAIL] ADC at minimum (-8388608 = 0x800000)");
+    telnet.println("       CAUSE: load cell not connected OR E+/E- swapped OR A+/A- swapped");
+    telnet.println("       FIX 1: Check all 4 wires (Red=E+, Black=E-, Green=A+, White=A-)");
+    telnet.println("       FIX 2: Try swapping A+ and A- on the HX711");
+    telnet.println("       FIX 3: Verify 3.3V-5V stable on HX711 VCC");
+    telnet.println("       TIP:   Run 'gain 32' or 'gain 64' to test other channels");
+  } else if (avg == 8388607) {
+    telnet.println("[FAIL] ADC at maximum (+8388607 = 0x7FFFFF)");
+    telnet.println("       CAUSE: overloaded or E+/E- swapped");
+  } else {
     telnet.println("[OK]   ADC not saturated");
+  }
 
   // 6. Current config summary
   telnet.printf("[CFG]  factor=%.4f  offset=%ld\n", calibration_factor, calibration_offset);
@@ -131,7 +151,7 @@ void setup() {
     telnet.println("\n--- ESP32 Weight Station v" + FIRMWARE_VERSION + " ---");
     telnet.println("MEASUREMENT : start | stop | tare");
     telnet.println("CALIBRATION : cal_tare | cal_weight <g> | calib <factor> | factor");
-    telnet.println("DIAGNOSTICS : diag | raw [n] | noise [n] | status");
+    telnet.println("DIAGNOSTICS : diag | raw [n] | noise [n] | gain <128|64|32> | wiring | status");
     telnet.println("SYSTEM      : update");
     telnet.print("> ");
   });
@@ -206,6 +226,41 @@ void setup() {
                     calibration_factor, calibration_offset);
 
     // ── Diagnostics ────────────────────────────────────────────────────────
+    // ── Gain / channel switching ───────────────────────────────────────────
+    } else if (str.startsWith("gain ")) {
+      int g = str.substring(5).toInt();
+      if (g == 128 || g == 64 || g == 32) {
+        scale.set_gain(g);
+        // dummy read to apply gain
+        if (scale.is_ready()) scale.read();
+        delay(100);
+        long v = scale.is_ready() ? scale.read() : -999999999L;
+        telnet.printf("[Gain] Set to %d. First read: %ld%s\n", g, v,
+                      v == -8388608 ? "  <- still saturated" :
+                      v == -999999999L ? "  <- not ready" : "  <- looks alive!");
+      } else {
+        telnet.println("[Gain] Valid values: 128 (ch A), 64 (ch A), 32 (ch B)");
+      }
+
+    // ── Wiring guide ─────────────────────────────────────────────────────
+    } else if (str == "wiring") {
+      telnet.println("\n=== Load Cell Wiring Guide ===");
+      telnet.println("HX711 side:  E+  E-  A+  A-  (or INA+ INA- on some boards)");
+      telnet.println("Load cell:   Excitation (+/-) and Signal (+/-)");
+      telnet.println("");
+      telnet.println("Typical wire colors:");
+      telnet.println("  Red   -> E+   (excitation positive)");
+      telnet.println("  Black -> E-   (excitation negative)");
+      telnet.println("  Green -> A+   (signal positive)");
+      telnet.println("  White -> A-   (signal negative)");
+      telnet.println("");
+      telnet.println("If reading is -8388608 (minimum):");
+      telnet.println("  1. Verify all 4 wires are inserted (common: white wire missing)");
+      telnet.println("  2. Swap A+ and A- – if value becomes +8388607 you had it backwards");
+      telnet.println("  3. Swap E+ and E- – same idea");
+      telnet.println("  4. Measure VCC-GND with multimeter (need stable 3.3-5V, >= 10mA)");
+      telnet.println("==============================\n");
+
     } else if (str == "diag") {
       runDiagnostics();
 
