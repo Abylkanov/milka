@@ -224,20 +224,31 @@ void cornerReport() {
 
 void runDiagnostics() {
   telnet.println("\n======= HX711 DIAGNOSTICS =======");
-  bool ready = scale.is_ready();
+
+  // Сначала останавливаем задачу — иначе она уже прочитала данные,
+  // DOUT поднялся HIGH, и быстрая проверка is_ready() всегда даёт false.
+  hx711Pause();
+
+  // Ждём следующую конверсию HX711 (до 200 мс при 10 Гц)
+  bool ready = false;
+  for (int i = 0; i < 40; i++) {
+    if (scale.is_ready()) { ready = true; break; }
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+
   telnet.println(ready ? "[OK]   HX711 отвечает (DOUT=LOW)"
                        : "[FAIL] HX711 не отвечает – проверь питание и провода");
   if (!ready) {
     telnet.printf("       DOUT=%d  SCK=%d\n", LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
     telnet.println("=================================\n");
+    hx711Resume();
     return;
   }
 
   const int N = 20;
   long samples[N];
   int  failures = 0;
-  telnet.printf("[INFO] Читаю %d семплов (hx711Task приостановлена): ", N);
-  hx711Pause();
+  telnet.printf("[INFO] Читаю %d семплов: ", N);
   for (int i = 0; i < N; i++) {
     if (scale.is_ready()) { samples[i] = safeRead(); telnet.print("."); }
     else                  { samples[i] = 0; failures++; telnet.print("X"); }
@@ -521,7 +532,12 @@ void setup() {
     } else if (str == "status") {
       telnet.println("[Status] Версия    : " + FIRMWARE_VERSION);
       telnet.println("[Status] IP        : " + WiFi.localIP().toString());
-      telnet.println("[Status] HX711     : " + String(scale.is_ready() ? "OK" : "НЕ ГОТОВ"));
+      // Ждём готовности под паузой задачи, чтобы не поймать HIGH после её чтения
+      hx711Pause();
+      bool hxOk = false;
+      for (int i = 0; i < 40 && !hxOk; i++) { hxOk = scale.is_ready(); if (!hxOk) vTaskDelay(pdMS_TO_TICKS(5)); }
+      hx711Resume();
+      telnet.println("[Status] HX711     : " + String(hxOk ? "OK" : "НЕ ГОТОВ"));
       telnet.printf( "[Status] Factor    : %.4f\n", calibration_factor);
       telnet.printf( "[Status] Offset    : %ld\n",  (long)scale.get_offset());
       telnet.printf( "[Status] Samples   : %d\n",   num_samples);
