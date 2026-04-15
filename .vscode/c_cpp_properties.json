@@ -1,0 +1,28 @@
+{
+  "configurations": [
+    {
+      "name": "ESP32",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "/home/maxat/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32",
+        "/home/maxat/.arduino15/packages/esp32/hardware/esp32/3.3.7/variants/esp32",
+        "/home/maxat/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/**",
+        "/home/maxat/Arduino/libraries/**",
+        "/home/maxat/.arduino15/packages/esp32/tools/esp-x32/2511/xtensa-esp-elf/include",
+        "/home/maxat/.arduino15/packages/esp32/tools/esp-x32/2511/picolibc/include"
+      ],
+      "defines": [
+        "ARDUINO=10607",
+        "ARDUINO_ESP32_DEV",
+        "ESP32",
+        "ESP_PLATFORM",
+        "F_CPU=240000000L"
+      ],
+      "compilerPath": "/home/maxat/.arduino15/packages/esp32/tools/esp-x32/2511/bin/xtensa-esp32-elf-gcc",
+      "cStandard": "gnu17",
+      "cppStandard": "gnu++17",
+      "intelliSenseMode": "gcc-x64"
+    }
+  ],
+  "version": 4
+}
