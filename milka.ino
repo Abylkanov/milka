@@ -252,7 +252,7 @@ void runDiagnostics() {
   for (int i = 0; i < N; i++) {
     if (scale.is_ready()) { samples[i] = safeRead(); telnet.print("."); }
     else                  { samples[i] = 0; failures++; telnet.print("X"); }
-    vTaskDelay(pdMS_TO_TICKS(80));
+    vTaskDelay(pdMS_TO_TICKS(120));
   }
   hx711Resume();
   telnet.printf(" готово (%d ошибок)\n", failures);
