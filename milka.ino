@@ -18,8 +18,8 @@ const int LOADCELL_DOUT_PIN = 22;
 const int LOADCELL_SCK_PIN  = 21;
 
 // ─── Дисплей SSD1306 ─────────────────────────────────────────────────────────
-#define OLED_SDA   4
-#define OLED_SCL   14
+#define OLED_SDA   14
+#define OLED_SCL   4
 #define OLED_ADDR  0x3C
 #define OLED_W     128
 #define OLED_H     64
@@ -418,11 +418,30 @@ void setup() {
     calibration_offset = scale.get_offset();
   }
 
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500); Serial.print(".");
-  }
-  Serial.println("\n[System] IP: " + WiFi.localIP().toString());
+  WiFi.disconnect(true); // Сброс старых сессий и настроек
+    delay(200);
+    WiFi.mode(WIFI_STA);   // Явная установка режима клиента
+    WiFi.begin(ssid, password);
+    
+    Serial.print("[WiFi] Connecting");
+    int attempts = 0;
+    // Ждем подключения не более 10 секунд (20 попыток по 500мс)
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+      delay(500); 
+      Serial.print(".");
+      attempts++;
+      
+      // Если на 10-й попытке всё еще нет связи, пробуем "пнуть" инициализацию еще раз
+      if (attempts == 10) {
+        WiFi.begin(ssid, password);
+      }
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("\n[System] IP: " + WiFi.localIP().toString());
+    } else {
+      Serial.println("\n[WiFi] Не удалось подключиться сразу. Попытки продолжатся в фоне.");
+    }
   updateDisplay(0.0f);  // покажем IP сразу после подключения
 
   // Запускаем задачу HX711 на Core 1 (WiFi-стек на Core 0)
