@@ -1,6 +1,9 @@
 #include <HX711.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include "ESPTelnet.h"
 
 // --- SETTINGS ---
@@ -14,9 +17,17 @@ const String FIRMWARE_VERSION = "1.1.1";
 const int LOADCELL_DOUT_PIN = 22;
 const int LOADCELL_SCK_PIN  = 21;
 
-ESPTelnet   telnet;
-HX711       scale;
-Preferences prefs;
+// ─── Дисплей SSD1306 ─────────────────────────────────────────────────────────
+#define OLED_SDA   4
+#define OLED_SCL   14
+#define OLED_ADDR  0x3C
+#define OLED_W     128
+#define OLED_H     64
+
+ESPTelnet        telnet;
+HX711            scale;
+Preferences      prefs;
+Adafruit_SSD1306 display(OLED_W, OLED_H, &Wire, -1);
 
 // ─── Настройки (NVS) ─────────────────────────────────────────────────────────
 float    calibration_factor = 420.0f;
@@ -115,6 +126,59 @@ void hx711Task(void* pv) {
     }
     vTaskDelay(pdMS_TO_TICKS(5)); // ~200 Гц опрос; HX711 выдаёт 10/80 Гц
   }
+}
+
+// ─── Дисплей ─────────────────────────────────────────────────────────────────
+//
+//  Макет 128×64:
+//  ┌────────────────────────────┐
+//  │ IP: 10.101.x.x             │  строка 0, шрифт 1×
+//  │                            │
+//  │   1234.56 г                │  строка 2–5, шрифт 2×
+//  │                            │
+//  │ [MEASURING] / [IDLE]       │  строка 7, шрифт 1×
+//  └────────────────────────────┘
+
+void updateDisplay(float weight) {
+  display.clearDisplay();
+
+  // Строка 1: IP-адрес
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print("IP: ");
+  display.print(WiFi.localIP().toString());
+
+  // Разделитель
+  display.drawLine(0, 10, OLED_W - 1, 10, SSD1306_WHITE);
+
+  // Центральный блок: вес крупным шрифтом
+  display.setTextSize(2);
+  char wbuf[16];
+  if (fabsf(weight) < 10000.0f)
+    snprintf(wbuf, sizeof(wbuf), "%.2f g", weight);
+  else
+    snprintf(wbuf, sizeof(wbuf), "%.0f g", weight);
+
+  // Вычисляем ширину для центрирования (каждый символ 2× = 12 пикс)
+  int16_t x1, y1; uint16_t tw, th;
+  display.getTextBounds(wbuf, 0, 0, &x1, &y1, &tw, &th);
+  int cx = (OLED_W - (int)tw) / 2;
+  if (cx < 0) cx = 0;
+  display.setCursor(cx, 20);
+  display.print(wbuf);
+
+  // Строка внизу: статус
+  display.setTextSize(1);
+  display.setCursor(0, 56);
+  if (isMeasuring)
+    display.print("[ MEASURING ]");
+  else if (autoZeroEnabled && fabsf(weight) < autoZeroThreshold)
+    display.print("[ AUTOZERO... ]");
+  else
+    display.print("[ IDLE ]");
+
+  display.display();
 }
 
 // ─── NVS ─────────────────────────────────────────────────────────────────────
@@ -327,6 +391,21 @@ void setup() {
   // Создаём mutex до первого использования
   scaleMutex = xSemaphoreCreateMutex();
 
+  // I2C на нестандартных пинах (SDA=4, SCL=14)
+  Wire.begin(OLED_SDA, OLED_SCL);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    Serial.println("[Display] SSD1306 not found — check wiring (SDA=4, SCL=14, addr=0x3C)");
+  } else {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 20);
+    display.println("  Weight Station");
+    display.setCursor(0, 36);
+    display.println("  Connecting WiFi...");
+    display.display();
+  }
+
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
   scale.set_gain(128);
   scale.set_scale(calibration_factor);
@@ -344,6 +423,7 @@ void setup() {
     delay(500); Serial.print(".");
   }
   Serial.println("\n[System] IP: " + WiFi.localIP().toString());
+  updateDisplay(0.0f);  // покажем IP сразу после подключения
 
   // Запускаем задачу HX711 на Core 1 (WiFi-стек на Core 0)
   xTaskCreatePinnedToCore(
@@ -592,14 +672,21 @@ void loop() {
     }
   }
 
-  // ── Вывод веса ────────────────────────────────────────────────────────────
-  if (isMeasuring && telnet.isConnected()) {
+  // ── Вывод веса (Telnet + дисплей) ────────────────────────────────────────
+  {
+    static unsigned long lastDisplay = 0;
     unsigned long now = millis();
-    if (now - previousMillis >= interval) {
-      previousMillis = now;
-      // Читаем из буфера — не ждём HX711, не блокируем Telnet
+    if (now - lastDisplay >= 500) {          // дисплей обновляем каждые 500 мс
+      lastDisplay = now;
       float weight = getFilteredWeight(num_samples);
-      telnet.printf("\r[Weight] %8.2f г      ", weight);
+      updateDisplay(weight);
+
+      if (isMeasuring && telnet.isConnected()) {
+        if (now - previousMillis >= interval) {
+          previousMillis = now;
+          telnet.printf("\r[Weight] %8.2f г      ", weight);
+        }
+      }
     }
   }
 }

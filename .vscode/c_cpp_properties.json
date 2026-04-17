@@ -7,7 +7,11 @@
         "/home/maxat/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32",
         "/home/maxat/.arduino15/packages/esp32/hardware/esp32/3.3.7/variants/esp32",
         "/home/maxat/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/**",
+        "/home/maxat/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Wire/src",
         "/home/maxat/Arduino/libraries/**",
+        "/home/maxat/Arduino/libraries/Adafruit_GFX_Library",
+        "/home/maxat/Arduino/libraries/Adafruit_SSD1306",
+        "/home/maxat/Arduino/libraries/Adafruit_BusIO",
         "/home/maxat/.arduino15/packages/esp32/tools/esp-x32/2511/xtensa-esp-elf/include",
         "/home/maxat/.arduino15/packages/esp32/tools/esp-x32/2511/picolibc/include"
       ],
