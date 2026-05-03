@@ -16,7 +16,7 @@ const String FIRMWARE_VERSION = "1.1.1";
 const int WIFI_LED = 2;
 
 const int LOADCELL_DOUT_PIN = 34;
-const int LOADCELL_SCK_PIN  = 32;
+const int LOADCELL_SCK_PIN  = 23;
 
 // ─── Дисплей SSD1306 ─────────────────────────────────────────────────────────
 #define OLED_SDA   14
