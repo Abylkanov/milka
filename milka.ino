@@ -12,7 +12,7 @@ const char* password = "1234512345";
 const char* firmware_url =
   "https://github.com/Abylkanov/milka/raw/refs/heads/main/build/esp32.esp32.esp32/milka.ino.bin";
 
-const String FIRMWARE_VERSION = "1.1.1";
+const String FIRMWARE_VERSION = "1.1.2";
 const int WIFI_LED = 2;
 
 const int LOADCELL_DOUT_PIN = 34;
