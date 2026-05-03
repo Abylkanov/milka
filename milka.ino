@@ -13,9 +13,10 @@ const char* firmware_url =
   "https://github.com/Abylkanov/milka/raw/refs/heads/main/build/esp32.esp32.esp32/milka.ino.bin";
 
 const String FIRMWARE_VERSION = "1.1.1";
+const int WIFI_LED = 2;
 
-const int LOADCELL_DOUT_PIN = 22;
-const int LOADCELL_SCK_PIN  = 21;
+const int LOADCELL_DOUT_PIN = 34;
+const int LOADCELL_SCK_PIN  = 32;
 
 // ─── Дисплей SSD1306 ─────────────────────────────────────────────────────────
 #define OLED_SDA   14
@@ -381,6 +382,19 @@ void noiseTest(int n) {
   telnet.printf("[Noise] avg=%ld  p-p raw=%ld  шум=%.3f г\n", avg, vmax - vmin, g_noise);
 }
 
+void broadcastIpTask(void *pvParameters) {
+    WiFiUDP udp;
+    for (;;) {
+        if (WiFi.status() == WL_CONNECTED) {
+            udp.beginPacket("255.255.255.255", 4210);
+            udp.printf("MILKA_STATION:%s", WiFi.localIP().toString().c_str());
+            udp.endPacket();
+        }
+        // Спим 30 секунд, не занимая процессор
+        vTaskDelay(pdMS_TO_TICKS(30000)); 
+    }
+}
+
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 void setup() {
@@ -417,6 +431,7 @@ void setup() {
     safeTare(15);
     calibration_offset = scale.get_offset();
   }
+  pinMode(WIFI_LED, OUTPUT);
 
   WiFi.disconnect(true); // Сброс старых сессий и настроек
     delay(200);
@@ -439,6 +454,8 @@ void setup() {
 
     if (WiFi.status() == WL_CONNECTED) {
       Serial.println("\n[System] IP: " + WiFi.localIP().toString());
+      xTaskCreatePinnedToCore(broadcastIpTask, "IpTask", 2048, NULL, 1, NULL, 0);
+      digitalWrite(WIFI_LED, HIGH);
     } else {
       Serial.println("\n[WiFi] Не удалось подключиться сразу. Попытки продолжатся в фоне.");
     }
