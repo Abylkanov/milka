@@ -1,9 +1,6 @@
 #include <HX711.h>
 #include <WiFi.h>
 #include <Preferences.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include "ESPTelnet.h"
 
 // --- SETTINGS ---
@@ -18,17 +15,9 @@ const int WIFI_LED = 2;
 const int LOADCELL_DOUT_PIN = 34;
 const int LOADCELL_SCK_PIN  = 32;
 
-// ─── Дисплей SSD1306 ─────────────────────────────────────────────────────────
-#define OLED_SDA   14
-#define OLED_SCL   4
-#define OLED_ADDR  0x3C
-#define OLED_W     128
-#define OLED_H     64
-
 ESPTelnet        telnet;
 HX711            scale;
 Preferences      prefs;
-Adafruit_SSD1306 display(OLED_W, OLED_H, &Wire, -1);
 
 // ─── Настройки (NVS) ─────────────────────────────────────────────────────────
 float    calibration_factor = 420.0f;
@@ -129,59 +118,6 @@ void hx711Task(void* pv) {
   }
 }
 
-// ─── Дисплей ─────────────────────────────────────────────────────────────────
-//
-//  Макет 128×64:
-//  ┌────────────────────────────┐
-//  │ IP: 10.101.x.x             │  строка 0, шрифт 1×
-//  │                            │
-//  │   1234.56 г                │  строка 2–5, шрифт 2×
-//  │                            │
-//  │ [MEASURING] / [IDLE]       │  строка 7, шрифт 1×
-//  └────────────────────────────┘
-
-void updateDisplay(float weight) {
-  display.clearDisplay();
-
-  // Строка 1: IP-адрес
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.print("IP: ");
-  display.print(WiFi.localIP().toString());
-
-  // Разделитель
-  display.drawLine(0, 10, OLED_W - 1, 10, SSD1306_WHITE);
-
-  // Центральный блок: вес крупным шрифтом
-  display.setTextSize(2);
-  char wbuf[16];
-  if (fabsf(weight) < 10000.0f)
-    snprintf(wbuf, sizeof(wbuf), "%.2f g", weight);
-  else
-    snprintf(wbuf, sizeof(wbuf), "%.0f g", weight);
-
-  // Вычисляем ширину для центрирования (каждый символ 2× = 12 пикс)
-  int16_t x1, y1; uint16_t tw, th;
-  display.getTextBounds(wbuf, 0, 0, &x1, &y1, &tw, &th);
-  int cx = (OLED_W - (int)tw) / 2;
-  if (cx < 0) cx = 0;
-  display.setCursor(cx, 20);
-  display.print(wbuf);
-
-  // Строка внизу: статус
-  display.setTextSize(1);
-  display.setCursor(0, 56);
-  if (isMeasuring)
-    display.print("[ MEASURING ]");
-  else if (autoZeroEnabled && fabsf(weight) < autoZeroThreshold)
-    display.print("[ AUTOZERO... ]");
-  else
-    display.print("[ IDLE ]");
-
-  display.display();
-}
-
 // ─── NVS ─────────────────────────────────────────────────────────────────────
 
 void saveSettings() {
@@ -222,7 +158,7 @@ static void insertionSort(long* arr, int n) {
 // Берёт последние n семплов из буфера, применяет trimmed mean (±20%).
 // Не вызывает scale.read() — не блокирует основной поток.
 float getFilteredWeight(int n) {
-  if (n < 3) n = 3;
+  if (n < 5) n = 5;
   if (n > RAW_BUF_SIZE) n = RAW_BUF_SIZE;
 
   long snap[RAW_BUF_SIZE];
@@ -239,8 +175,9 @@ float getFilteredWeight(int n) {
 
   insertionSort(snap, snapN);
 
-  int drop = snapN / 5;
-  int from = drop, to = snapN - drop;
+  // Берём только средние 50% — жёсткое отсечение
+  int from = snapN / 4;
+  int to   = snapN - snapN / 4;
   if (from >= to) { from = 0; to = snapN; }
 
   long long sum = 0;
@@ -405,21 +342,6 @@ void setup() {
   // Создаём mutex до первого использования
   scaleMutex = xSemaphoreCreateMutex();
 
-  // I2C на нестандартных пинах (SDA=4, SCL=14)
-  Wire.begin(OLED_SDA, OLED_SCL);
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println("[Display] SSD1306 not found — check wiring (SDA=4, SCL=14, addr=0x3C)");
-  } else {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 20);
-    display.println("  Weight Station");
-    display.setCursor(0, 36);
-    display.println("  Connecting WiFi...");
-    display.display();
-  }
-
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
   scale.set_gain(128);
   scale.set_scale(calibration_factor);
@@ -459,7 +381,6 @@ void setup() {
     } else {
       Serial.println("\n[WiFi] Не удалось подключиться сразу. Попытки продолжатся в фоне.");
     }
-  updateDisplay(0.0f);  // покажем IP сразу после подключения
 
   // Запускаем задачу HX711 на Core 1 (WiFi-стек на Core 0)
   xTaskCreatePinnedToCore(
@@ -715,7 +636,6 @@ void loop() {
     if (now - lastDisplay >= 500) {          // дисплей обновляем каждые 500 мс
       lastDisplay = now;
       float weight = getFilteredWeight(num_samples);
-      updateDisplay(weight);
 
       if (isMeasuring && telnet.isConnected()) {
         if (now - previousMillis >= interval) {
